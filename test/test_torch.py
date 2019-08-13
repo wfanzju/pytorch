@@ -265,10 +265,11 @@ class _TestTorchMixin(object):
 
     def test_ger(self):
         types = {
-            'torch.DoubleTensor': 1e-8,
-            'torch.FloatTensor': 1e-4,
+            'torch.DoubleTensor',
+            'torch.FloatTensor',
+            'torch.BFloat16Tensor',
         }
-        for tname, _prec in types.items():
+        for tname in types:
             v1 = torch.randn(100).type(tname)
             v2 = torch.randn(100).type(tname)
             res1 = torch.ger(v1, v2)
@@ -279,7 +280,7 @@ class _TestTorchMixin(object):
             self.assertEqual(res1, res2)
 
         # Test 0-strided
-        for tname, _prec in types.items():
+        for tname in types:
             v1 = torch.randn(1).type(tname).expand(100)
             v2 = torch.randn(100).type(tname)
             res1 = torch.ger(v1, v2)
@@ -291,8 +292,9 @@ class _TestTorchMixin(object):
 
     def test_addr(self):
         types = {
-            'torch.DoubleTensor': 1e-8,
-            'torch.FloatTensor': 1e-4,
+            'torch.DoubleTensor',
+            'torch.FloatTensor',
+            'torch.BFloat16Tensor',
         }
 
         def run_test(m, v1, v2, m_transform=lambda x: x):
@@ -304,7 +306,7 @@ class _TestTorchMixin(object):
                     ref[i, j] += v1[i] * v2[j]
             self.assertEqual(m, ref)
 
-        for tname, _prec in types.items():
+        for tname in types:
             for h, w in [(100, 110), (1, 20), (200, 2)]:
                 m = torch.randn(h, w).type(tname)
                 v1 = torch.randn(h).type(tname)
@@ -321,6 +323,7 @@ class _TestTorchMixin(object):
         types = {
             'torch.DoubleTensor': 1e-8,
             'torch.FloatTensor': 1e-4,
+            'torch.BFloat16Tensor': 0.4,
         }
         for tname, _prec in types.items():
             t = torch.randn(10).type(tname)
@@ -332,7 +335,8 @@ class _TestTorchMixin(object):
             for i in range(10):
                 for j in range(100):
                     res2[i] += m[i, j] * v[j]
-            self.assertEqual(res1, res2)
+
+            self.assertEqual(res1, res2, _prec)
 
         # Test 0-strided
         for tname, _prec in types.items():
@@ -345,12 +349,14 @@ class _TestTorchMixin(object):
             for i in range(10):
                 for j in range(100):
                     res2[i] += m[i, j] * v[j]
-            self.assertEqual(res1, res2)
+
+            self.assertEqual(res1, res2, _prec)
 
     def test_addmm(self):
         types = {
             'torch.DoubleTensor': 1e-8,
             'torch.FloatTensor': 1e-4,
+            'torch.BFloat16Tensor': 0.3,
         }
         for tname, _prec in types.items():
             M = torch.randn(10, 25).type(tname)
@@ -363,7 +369,7 @@ class _TestTorchMixin(object):
                 for j in range(25):
                     for k in range(50):
                         res2[i, j] += m1[i, k] * m2[k, j]
-            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res2, _prec)
 
         # Test 0-strided
         for tname, _prec in types.items():
@@ -377,7 +383,7 @@ class _TestTorchMixin(object):
                 for j in range(25):
                     for k in range(50):
                         res2[i, j] += m1[i, k] * m2[k, j]
-            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res2, _prec)
 
     def test_logical_any(self):
         for device in torch.testing.get_all_device_types():
@@ -1610,15 +1616,19 @@ class _TestTorchMixin(object):
         self.assertFalse(x.any())
 
     def test_mv(self):
-        m1 = torch.randn(100, 100)
-        v1 = torch.randn(100)
+        def _test_mv(m1, v1):
+            res1 = torch.mv(m1, v1)
+            res2 = res1.clone().zero_()
+            for i, j in iter_indices(m1):
+                res2[i] += m1[i][j] * v1[j]
 
-        res1 = torch.mv(m1, v1)
-        res2 = res1.clone().zero_()
-        for i, j in iter_indices(m1):
-            res2[i] += m1[i][j] * v1[j]
+            self.assertEqual(res1, res2)
 
-        self.assertEqual(res1, res2)
+        _test_mv(torch.randn(100, 100, dtype=torch.float32), torch.randn(100, dtype=torch.float32))
+        _test_mv(torch.randn(100, 100, dtype=torch.float64), torch.randn(100, dtype=torch.float64))
+        _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int32), torch.randint(0, 100, (100, ), dtype=torch.int32))
+        _test_mv(torch.randint(0, 100, (100, 100), dtype=torch.int64), torch.randint(0, 100, (100, ), dtype=torch.int64))
+        _test_mv(torch.randn(100, 100, dtype=torch.float32).bfloat16(), torch.randn(100, dtype=torch.float32).bfloat16())
 
     def test_numpy_args(self):
         x1 = torch.randn(10)
@@ -1894,6 +1904,7 @@ class _TestTorchMixin(object):
                 a1 = torch.tensor([0.1, 0.1], dtype=torch.bfloat16, device=device)
                 a2 = torch.tensor([1.1, 0.1], dtype=torch.bfloat16, device=device)
                 self.assertEqual(a1 * a2, torch.tensor([0.11, 0.01], dtype=torch.bfloat16, device=device), 0.01)
+                self.assertEqual(a1.mul(a2), a1 * a2)
 
     def test_div(self):
         m1 = torch.randn(10, 10)
@@ -1907,6 +1918,7 @@ class _TestTorchMixin(object):
         a1 = torch.tensor([4.2, 6.2], dtype=torch.bfloat16)
         a2 = torch.tensor([2., 2.], dtype=torch.bfloat16)
         self.assertEqual(a1 / a2, torch.tensor([2.1, 3.1], dtype=torch.bfloat16), 0.01)
+        self.assertEqual(a1.div(a2), a1 / a2)
 
     def test_floordiv(self):
         for dtype in torch.testing.get_all_math_dtypes('cpu'):
@@ -2068,6 +2080,7 @@ class _TestTorchMixin(object):
             _test_mm(n, m, p, torch.float64, lambda x, y: torch.randn(x, y, dtype=torch.float64))
             _test_mm(n, m, p, torch.int32, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int32))
             _test_mm(n, m, p, torch.int64, lambda x, y: torch.randint(0, 100, (x, y), dtype=torch.int64))
+            _test_mm(n, m, p, torch.bfloat16, lambda x, y: torch.randn(x, y, dtype=torch.float32).bfloat16())
 
     @staticmethod
     def _test_lu(self, cast, pivot=True):
